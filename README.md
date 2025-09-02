@@ -79,7 +79,7 @@ nostr-zap-listener/
 
 - ⚡ Lightning: `davidebtc@lnbits.davidebtc.me`
 - ₿ On-chain: `bc1qu8wqn73c6wa7gw2ks6m3rscgntscpu3czvz0h8`
-- 
+  
 ## Safety
 - **Never commit your real `.env`**. Only commit `.env.example`.
 - Keep your `nsec` secret.
