@@ -1,6 +1,25 @@
+# env
 .env
-db/*.db
+*.env
+
+# python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
 .venv/
 venv/
+
+# DB & logs (keep folders but ignore contents)
+db/*
+!db/.gitkeep
+logs/*
+!logs/.gitkeep
+*.db
+*.sqlite*
+*.log
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
