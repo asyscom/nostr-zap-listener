@@ -12,6 +12,8 @@ and builds a **Weekly Zap Leaderboard** stored in SQLite.
 - Customizable thank-you template
 - Weekly leaderboard (manual or auto on each zap with debounce)
 - SQLite persistence so data survives restarts
+- Defensive cap on parsed amount via `MAX_SATS_PER_ZAP`
+
 
 ## Requirements
 - Python 3.10+ recommended
@@ -38,12 +40,13 @@ nano .env
 Key variables (see `.env.example` for all):
 - `NSEC`: your private key in `nsec` format
 - `RELAYS`: comma or space separated relay URLs
-- `DB_PATH`: SQLite path (default: `./db/zaps.db`)
+- `DB_PATH`: SQLite path (default: `./zaps.db`)
 - `TOP_N`: how many users to show in the leaderboard
 - `MIN_ZAP_SATS`: ignore micro-zaps below this (in sats)
 - `REPLY_ON_UNKNOWN`: reply even if amount is unknown (1/0)
 - `ALLOW_SELF_ZAP`: count self-zaps (1/0)
 - `MIN_LEADERBOARD_INTERVAL`: debounce (seconds) for auto-leaderboard posts
+- `MAX_SATS_PER_ZAP`: **hard cap** for a single zap amount (in sats) to avoid inflated values (e.g. `100000`)
 
 ## Run the listener
 ```bash
