@@ -82,63 +82,39 @@ def parse_tag_list(ev, key):
     return out
 
 # ---- BOLT11 amount parser (decimali + m/u/n/p) ----
-_BOLT11_HRP_RE = re.compile(r'^ln\w{2,}([0-9]+(?:\.[0-9]+)?)([munp]?)(1)', re.IGNORECASE)
+_BOLT11_HRP_RE = re.compile(r'^ln[a-z]{2,}([0-9]+(?:\.[0-9]+)?)([munp]?)1', re.IGNORECASE)
+
 def msat_from_bolt11(pr: str):
     """
-    Estrae amount dall'HRP del BOLT11 e lo converte in msat
-    SENZA regex: prende tutto tra 'ln<currency>' e il primo '1'.
+    Estrae l'importo dall'HRP dell'invoice BOLT11 e lo converte in msat.
+    Usa la *regex* per trovare il separatore '1' DOPO l'unità (munp),
+    così stringhe come 'lnbc210n1...' vengono interpretate come 21 sats (21000 msat).
     Esempi:
-      lnbc300n1...  -> 300n   -> 300 * 100 msat   = 30_000 msat  (30 sats)
-      lnbc420n1...  -> 420n   -> 420 * 100 msat   = 42_000 msat  (42 sats)
-      lnbc10.5u1... -> 10.5u  -> 10.5 * 100_000   = 1_050_000 msat (1_050 sats)
-      lnbc1p1...    -> 1p     -> 1 / 10           = 0.1 msat  (≈0 → 0 msat)
+      lnbc300n1...   -> 30 sats  (300 * 100 msat)
+      lnbc420n1...   -> 42 sats
+      lnbc10.5u1...  -> 1_050 sats
+      lnbc1m1...     -> 100_000 sats
     """
     try:
+        if not pr:
+            return None
         s = pr.strip().lower()
-        if not s.startswith("ln"):
+        m = _BOLT11_HRP_RE.match(s)
+        if not m:
             return None
 
-        # trova il separatore '1' (inizio della data part)
-        pos1 = s.find("1")
-        if pos1 < 0:
-            return None
-
-        # hrp dopo 'ln' e prima di '1' (es: 'bc300n' oppure solo 'bc' se amountless)
-        hrp_body = s[2:pos1]  # skip 'ln'
-
-        # salta il prefisso alfabetico di valuta (es: 'bc', 'tb', 'bcrt')
-        i = 0
-        while i < len(hrp_body) and hrp_body[i].isalpha():
-            i += 1
-
-        amount_part = hrp_body[i:]  # es: '300n', '10.5u', '', ...
-
-        # amountless invoice (nessun importo nell'HRP) -> None
-        if not amount_part:
-            return None
-
-        # separa suffisso se ultimo char è in munp
-        if amount_part[-1] in "munp":
-            suf = amount_part[-1]
-            num_str = amount_part[:-1]
-        else:
-            suf = ""
-            num_str = amount_part
-
-        if not num_str:
-            return None
-
-        from decimal import Decimal
+        num_str, suf = m.groups()
         val = Decimal(num_str)  # può essere decimale
 
-        # 1 BTC = 100_000_000 sat = 100_000_000_000 msat
-        if   suf == "m": msat = val * Decimal(100_000_000)       # mBTC → msat
-        elif suf == "u": msat = val * Decimal(100_000)           # μBTC → msat
-        elif suf == "n": msat = val * Decimal(100)               # nBTC → msat
-        elif suf == "p": msat =  val / Decimal(10)               # pBTC → msat
-        else:            msat = val * Decimal(100_000_000_000)   # BTC → msat
+        # 1 BTC = 100_000_000_000 msat
+        if   suf == "m": msat = val * Decimal('1e8')        # mBTC
+        elif suf == "u": msat = val * Decimal('1e5')        # μBTC
+        elif suf == "n": msat = val * Decimal('1e2')        # nBTC
+        elif suf == "p": msat =  val / Decimal('1e1')       # pBTC
+        else:            msat = val * Decimal('1e11')       # BTC
 
-        return int(msat)  # floor
+        msat_int = int(msat)  # floor
+        return msat_int if msat_int > 0 else None
     except Exception:
         return None
 
@@ -163,46 +139,29 @@ def make_thank_text(sats, unknown, rank, zapper_hex):
 
 def parse_zap(ev):
     """
-    Ordine di estrazione importo:
-      1) tag 'amount' sul receipt (msat)
-      2) tag 'bolt11' sul receipt (→ msat)
-      3) 'description.tags' può contenere ['amount','<msat>']
+    Estrazione importo (msat) con priorità:
+      1) description.tags['amount'] (msat)
+      2) tag 'amount' nel receipt (msat)
+      3) HRP dell'invoice 'bolt11' (→ msat)
+    + sanity-cap via MAX_SANE_SATS (in sats, default 10_000_000)
     """
+    MAX_SANE_SATS = int(os.getenv("MAX_SANE_SATS", "10000000"))
+
     res = {"sats":0, "unknown":True, "zapper_hex":None, "note_id":None,
            "recipients_in_desc":[], "recipients_in_event":[], "relays":[]}
 
-    # 1) 'amount' (msat) sul receipt
-    amt = parse_tag_list(ev, "amount")
-    if amt:
-        try:
-            res["sats"] = int(amt[0]) // 1000
-            res["unknown"] = False
-        except:
-            pass
+    ms_desc = None
+    ms_receipt = None
+    ms_hrp = None
 
-    # 2) 'bolt11' sul receipt → msat
-    if res["unknown"] or res["sats"] == 0:
-        bolt = parse_tag_list(ev, "bolt11")
-        if bolt:
-            ms = msat_from_bolt11(bolt[0])
-            # DEBUG: stampa cosa abbiamo parsato
-            try:
-                print(f"DEBUG bolt11 parse → msat={ms} (bolt11={bolt[0][:24]}…)")
-            except Exception:
-                pass
-            if ms:
-                res["sats"] = ms // 1000
-                res["unknown"] = False
-
-    # 3) description JSON (zap request) — tags e amount in msat
+    # --- description JSON (zap request) ---
     desc = parse_tag_list(ev, "description")
     if desc:
         try:
             dj = json.loads(desc[0])
             if isinstance(dj, dict):
                 res["zapper_hex"] = dj.get("pubkey") or res["zapper_hex"]
-                tags = dj.get("tags") or []
-                for tg in tags:
+                for tg in dj.get("tags") or []:
                     if isinstance(tg, list) and tg:
                         t0 = tg[0]
                         if t0 == "e" and len(tg) > 1 and not res["note_id"]:
@@ -215,24 +174,48 @@ def parse_zap(ev):
                                     res["relays"].append(u.strip())
                         elif t0 == "amount" and len(tg) > 1:
                             try:
-                                ms = int(str(tg[1]).strip())
-                                # DEBUG: amount in description.tags
-                                try:
-                                    print(f"DEBUG desc.tags amount → msat={ms}")
-                                except Exception:
-                                    pass
-                                if (res["unknown"] or res["sats"] == 0) and ms > 0:
-                                    res["sats"] = ms // 1000
-                                    res["unknown"] = False
-                            except:
+                                ms_desc = int(str(tg[1]).strip())
+                                print(f"DEBUG desc.tags amount → msat={ms_desc}")
+                            except Exception:
                                 pass
         except Exception:
             pass
 
+    # --- amount msat sul receipt ---
+    amt = parse_tag_list(ev, "amount")
+    if amt:
+        try:
+            ms_receipt = int(amt[0])
+            print(f"DEBUG receipt amount → msat={ms_receipt}")
+        except Exception:
+            pass
+
+    # --- HRP dall'invoice ---
+    bolt = parse_tag_list(ev, "bolt11")
+    if bolt:
+        ms_hrp = msat_from_bolt11(bolt[0])
+        print(f"DEBUG bolt11 parse → msat={ms_hrp} (bolt11={bolt[0][:24]}…)")
+
+    # --- scelta finale (priorità + sanity cap) ---
+    candidates = [ms for ms in (ms_desc, ms_receipt, ms_hrp) if isinstance(ms, int) and ms > 0]
+    if candidates:
+        ms = candidates[0]  # ms_desc vince se presente
+        # sanity cap: scarta importi > MAX_SANE_SATS
+        if ms // 1000 > MAX_SANE_SATS:
+            # prova un altro candidato “ragionevole”
+            ok = [x for x in candidates if x // 1000 <= MAX_SANE_SATS]
+            ms = ok[0] if ok else None
+    else:
+        ms = None
+
+    if ms:
+        res["sats"] = ms // 1000
+        res["unknown"] = False
+
     # destinatari sull'evento (p/P)
     res["recipients_in_event"] = parse_tag_list(ev, "p") + parse_tag_list(ev, "P")
 
-    # fallback diretti
+    # fallback zapper/note
     if not res["zapper_hex"]:
         P = parse_tag_list(ev,"P")
         if P: res["zapper_hex"]=P[0]
