@@ -1,0 +1,10 @@
+[Unit]
+Description=Nostr zap listener watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nostr_watchdog.py
+Nice=10
+

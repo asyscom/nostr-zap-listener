@@ -292,15 +292,29 @@ def main():
                 if not (match_desc or match_ev or match_self):
                     continue
 
+                                # --- prima di tutto: non processare se già presente ---
+                already = conn.execute("SELECT 1 FROM zaps WHERE event_id=?", (ev.id,)).fetchone()
+                if already:
+                    log(f"Skipping already-processed event id={ev.id[:8]}…")
+                    # aggiorna last_since comunque se necessario
+                    if ev.created_at and ev.created_at > since:
+                        since = ev.created_at; set_state("last_since", since)
+                    continue
+
                 try:
                     conn.execute(
                         "INSERT INTO zaps(event_id, zapper_pubkey, note_id, amount_msat, created_at, week) VALUES(?,?,?,?,?,?)",
                         (ev.id, data.get("zapper_hex") or "", data.get("note_id") or "",
-                         data["sats"]*1000, ev.created_at, week_key(ev.created_at))
+                         (data.get("sats") or 0)*1000, ev.created_at, week_key(ev.created_at))
                     )
                     conn.commit()
                 except sqlite3.IntegrityError:
-                    pass
+                    log(f"IntegrityError inserting event id={ev.id[:8]}… skipping reply")
+                    # se per qualche motivo è stata inserita da un altro processo tra SELECT e INSERT,
+                    # evitiamo comunque di rispondere
+                    if ev.created_at and ev.created_at > since:
+                        since = ev.created_at; set_state("last_since", since)
+                    continue
 
                 if ev.created_at and ev.created_at > since:
                     since = ev.created_at; set_state("last_since", since)

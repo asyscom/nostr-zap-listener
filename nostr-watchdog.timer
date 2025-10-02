@@ -1,0 +1,11 @@
+[Unit]
+Description=Run nostr-watchdog every minute
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+
