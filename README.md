@@ -1,3 +1,4 @@
+
 # nostr-zap-listener ⚡
 
 A small Python bot that listens for NIP-57 zap receipts, replies with a thank-you,
@@ -13,7 +14,7 @@ and builds a **Weekly Zap Leaderboard** stored in SQLite.
 - Weekly leaderboard (manual or auto on each zap with debounce)
 - SQLite persistence so data survives restarts
 - Defensive cap on parsed amount via `MAX_SATS_PER_ZAP`
-
+- **Watchdog**: monitors the listener and automatically restarts it if it stops responding
 
 ## Requirements
 - Python 3.10+ recommended
@@ -69,20 +70,14 @@ TOP_N=10
 MIN_LEADERBOARD_INTERVAL=300
 ```
 
-## Project layout (suggested)
-```
-nostr-zap-listener/
-├── .env.example
-├── listen_zaps.py
-├── publish_leaderboard.py
-├── db/              # ignored by git; holds zaps.db
-└── logs/            # ignored by git; optional runtime logs
-```
-## Donations
+## Watchdog
+The watchdog monitors the listener service and restarts it if it stops responding.
+Configured via systemd `.service` and `.timer` files.
 
+## Donations
 - ⚡ Lightning: `davidebtc@lnbits.davidebtc.me`
 - ₿ On-chain: `bc1qu8wqn73c6wa7gw2ks6m3rscgntscpu3czvz0h8`
-  
+
 ## Safety
 - **Never commit your real `.env`**. Only commit `.env.example`.
 - Keep your `nsec` secret.
